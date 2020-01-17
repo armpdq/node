@@ -4,10 +4,12 @@
   "dependencies": {
     "cluster": "^0.7.7",
     "crypto": "^1.0.1",
+    "express": "^4.17.1",
     "fs": "0.0.1-security",
     "geoip-lite": "^1.3.8",
     "maxmind": "^4.0.0",
     "mongodb": "^3.4.1",
+    "morgan": "^1.9.1",
     "mysql": "latest",
     "prom-client": "^11.5.3",
     "swagger-stats": "^0.95.11",

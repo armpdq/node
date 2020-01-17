@@ -1,0 +1,25 @@
+{
+	"apps": [
+		{
+			"name": "node-0",
+			"script": "./app.js",
+			"args": [
+				3001
+			]
+		},
+		{
+			"name": "node-1",
+			"script": "./app.js",
+			"args": [
+				3002
+			]
+		},
+		{
+			"name": "node-2",
+			"script": "./app.js",
+			"args": [
+				3003
+			]
+		}
+	]
+}
