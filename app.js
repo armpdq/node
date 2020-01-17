@@ -1,6 +1,5 @@
-const cluster = require('cluster');
-const http = require('http');
-const numCPUs = require('os').cpus().length;
+const express = require('express');
+const logger = require('morgan')('tiny');
 const crypto = require('crypto');
 const fs = require('fs');
 const maxmind = require('maxmind');
@@ -16,10 +15,11 @@ const AES_METHOD = 'aes-256-cbc';
 const IV_LENGTH = 16;
 const password = 'lbwyBzfgzUIvX3369785kaWvLJhIVq36';
 
+const app = express();
+
 let dir_path = __dirname + '/';
 
-let s_port = 80;
-// let s_port = 3001;
+let s_port = process.argv[2] || 3000;
 
 
 let requests = {};
@@ -32,6 +32,7 @@ let camps = [];
 let requestsAllCount = 0;
 let responseSuccess = 0;
 
+
 function encrypt(text) {
     if (process.versions.openssl <= '1.0.1f') {
         throw new Error('OpenSSL Version too old, vulnerability to Heartbleed')
@@ -41,78 +42,6 @@ function encrypt(text) {
     let encrypted = cipher.update(text);
     encrypted = Buffer.concat([encrypted, cipher.final()]);
     return iv.toString('hex') + ':' + encrypted.toString('hex');
-}
-
-if (cluster.isMaster) {
-    for (var i = 0; i < numCPUs; i++) {
-        cluster.fork();
-    }
-
-    cluster.on('exit', (worker, code, signal) => {
-        if (signal) {
-            console.log(`worker was killed by signal: ${signal}`);
-        } else if (code !== 0) {
-            console.log(`worker exited with error code: ${code}`);
-        } else {
-            console.log('worker success!');
-        }
-    });
-
-} else {
-    getCamps(cluster.worker.id);
-    getFeeds();
-    maxmind.open('./GeoIP2-Country.mmdb').then((lookup) => {
-        http.createServer((req, res) => {
-            requestsAllCount++;
-            if (requestsAllCount % 1000 === 0) console.log(requestsAllCount + ' - worker: ' + cluster.worker.id);
-
-            var url_parts = url.parse(req.url, true);
-            var query = url_parts.query;
-            
-            const sendData = requestHandler(query, lookup)
-            
-            if (sendData && sendData.length) {
-                responseSuccess++;
-                if (responseSuccess % 1000 === 0) console.log('- ' + responseSuccess + ' - worker: ' + cluster.worker.id);
-                res.writeHead(200, {"Content-Type": "text/javascript;charset=UTF-8"});
-                res.end(JSON.stringify(sendData));
-            } else {
-                res.writeHead(204);
-                res.end();
-            }
-
-            return true;
-
-        }).listen(s_port, () => console.log(`Server listening on ${s_port}`));
-    });
-
-    setInterval(function () {
-        if (Object.keys(requests).length) {
-            let reqStr = JSON.stringify(requests);
-            fs.writeFile(dir_path + "requestLog/log_" + makeid(10) + '.log', reqStr, function (err) {
-                if (err) {
-                    console.log(err);
-                    return 'file write error';
-                }
-                requests = {};
-            });
-        }
-
-    }, 20000);
-
-    setInterval(function () {
-        if (Object.keys(requestsAll).length) {
-            let reqStr = JSON.stringify(requestsAll);
-            fs.writeFile(dir_path + "requestLogAll/log_" + makeid(10) + '.log', reqStr, function (err) {
-                if (err) {
-                    console.log(err);
-                    return 'file write error';
-                }
-                requestsAll = {};
-            });
-        }
-    }, 20000);
-
 }
 
 function getLimit (query, pid) {
@@ -245,15 +174,24 @@ function makeid(length) {
     return result;
 }
 
-function getCamps(worker_id) {
-
-    if (!fs.existsSync('camps.json')) return;
-    
-    fs.readFile('camps.json', (err, rawData) => sortData(JSON.parse(rawData)));
+function getCamps() {
+    return new Promise((resolve, reject) => {    
+        fs.readFile('camps.json', (err, rawData) => {
+            if (err) return resolve();
+            sortData(JSON.parse(rawData));
+            resolve();
+        });
+    });
 }
 
 function getFeeds() {
-    fs.readFile('pids.json', (err, rawData) => feeds = JSON.parse(rawData));
+    return new Promise((resolve, reject) => {
+        fs.readFile('pids.json', (err, rawData) => {
+            if (err) return resolve();
+            feeds = JSON.parse(rawData);
+            resolve();
+        });
+    });
 }
 
 function sortData(result) {
@@ -300,3 +238,62 @@ function getFeed(pid) {
 function getPidRate(pid) {
     return typeof feeds[pid] != 'undefined' ? feeds[pid]['rate'] : false;
 }
+
+
+async function runWorker () {
+    await getCamps();
+    await getFeeds();
+    const lookup = await maxmind.open('./GeoIP2-Country.mmdb');
+
+    app.use(logger);
+
+    app.get('*', (req, res) => {
+        const sendData = requestHandler(req.query, lookup)
+        
+        if (sendData && sendData.length) {
+            // responseSuccess++;
+            // if (responseSuccess % 1000 === 0) console.log('- ' + responseSuccess + ' - worker: ' + process.env.name);
+            return res.json(sendData);
+        } 
+
+        res.status(204).end();
+    });
+
+    app.listen(s_port, (err) => err ? console.error(err) : console.log(`Server listening on ${s_port}`));
+
+    setInterval(function () {
+        if (Object.keys(requests).length) {
+            let reqStr = JSON.stringify(requests);
+            fs.writeFile(dir_path + "requestLog/log_" + makeid(10) + '.log', reqStr, function (err) {
+                if (err) {
+                    console.log(err);
+                    return 'file write error';
+                }
+                requests = {};
+            });
+        }
+
+        if (Object.keys(requestsAll).length) {
+            let reqStr = JSON.stringify(requestsAll);
+            fs.writeFile(dir_path + "requestLogAll/log_" + makeid(10) + '.log', reqStr, function (err) {
+                if (err) {
+                    console.log(err);
+                    return 'file write error';
+                }
+                requestsAll = {};
+            });
+        }
+
+    }, 20000);
+
+    setInterval(async function () {
+        try {
+            await getCamps();
+            await getFeeds();
+        } catch (e) {
+            console.error(e);
+        }
+    }, 60 * 1000 * 2);
+}
+
+runWorker();
