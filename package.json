@@ -13,7 +13,7 @@
     "mysql": "latest",
     "prom-client": "^11.5.3",
     "swagger-stats": "^0.95.11",
-    "ua-parser-js": "^0.7.20",
+    "ua-parser-js": "^0.7.24",
     "url": "^0.11.0"
   }
 }
